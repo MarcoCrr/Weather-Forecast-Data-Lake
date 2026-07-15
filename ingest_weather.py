@@ -1,49 +1,61 @@
 import os
 import sys
+import json
+import logging
+from datetime import datetime
 import requests
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Configuration
+DATA_DIR = os.path.join("data", "raw")
+
+def save_raw_data(city, data):
+    """
+    Saves the raw JSON data to the local filesystem under data/raw/
+    with a timestamped filename.
+    """
+    try:
+        # Ensure the output directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)
+        
+        # Generate a safe filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_city_name = city.lower().replace(" ", "_")
+        filename = f"{safe_city_name}_{timestamp}.json"
+        filepath = os.path.join(DATA_DIR, filename)
+        
+        # Write JSON data to file
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+            
+        logger.info(f"Successfully saved raw data for {city} to {filepath}")
+    except IOError as e:
+        logger.error(f"Failed to save data for {city} to disk: {e}")
 
 def fetch_weather(cities, api_key):
     """
-    Fetches current weather data for a list of cities using the OpenWeather API.
+    Fetches current weather data for a list of cities using the OpenWeather API
+    and saves the raw JSON response locally.
     """
     base_url = "https://api.openweathermap.org/data/2.5/weather"
     
     for city in cities:
-        print(f"Fetching weather for {city}...")
+        logger.info(f"Fetching weather for {city}...")
         params = {
             'q': city,
             'appid': api_key,
-            'units': 'metric'  # Use metric units (Celsius). Change to 'imperial' for Fahrenheit.
+            'units': 'metric'
         }
         
         try:
             response = requests.get(base_url, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Print a summary of the fetched data
-            temp = data['main']['temp']
-            weather_desc = data['weather'][0]['description']
-            print(f"Success: {city} is currently {temp}°C with {weather_desc}.")
-            # In a full pipeline, you would save this JSON data to a database or file here.
-            
-        except requests.exceptions.HTTPError as http_err:
-            print(f"HTTP error occurred for {city}: {http_err}")
-            if response.status_code == 401:
-                print("Please check if your OPENWEATHER_API_KEY is valid.")
-        except Exception as err:
-            print(f"An error occurred for {city}: {err}")
-
-if __name__ == "__main__":
-    # Retrieve API key from environment variable
-    api_key = os.environ.get("OPENWEATHER_API_KEY")
-    
-    if not api_key:
-        print("Error: OPENWEATHER_API_KEY environment variable not set.")
-        print("Please set it using: export OPENWEATHER_API_KEY='your_api_key'")
-        sys.exit(1)
-        
-    # Default list of cities if none are provided via command line arguments
-    target_cities = sys.argv[1:] if len(sys.argv) > 1 else ["London", "New York", "Tokyo"]
-    
-    fetch_weather(target_cities, api_key)
+            response.raise_for_
