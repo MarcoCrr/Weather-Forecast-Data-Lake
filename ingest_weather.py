@@ -58,4 +58,29 @@ def fetch_weather(cities, api_key):
         
         try:
             response = requests.get(base_url, params=params)
-            response.raise_for_
+            response.raise_for_status()
+            data = response.json()
+            
+            # Save the raw JSON data locally
+            save_raw_data(city, data)
+            
+        except requests.exceptions.HTTPError as http_err:
+            logger.error(f"HTTP error occurred for {city}: {http_err}")
+            if response.status_code == 401:
+                logger.error("Please check if your OPENWEATHER_API_KEY is valid.")
+        except Exception as err:
+            logger.error(f"An error occurred for {city}: {err}")
+
+if __name__ == "__main__":
+    # Retrieve API key from environment variable
+    api_key = os.environ.get("OPENWEATHER_API_KEY")
+    
+    if not api_key:
+        logger.error("OPENWEATHER_API_KEY environment variable not set.")
+        logger.error("Please set it using: export OPENWEATHER_API_KEY='your_api_key'")
+        sys.exit(1)
+        
+    # Default list of cities if none are provided via command line arguments
+    target_cities = sys.argv[1:] if len(sys.argv) > 1 else ["London", "New York", "Tokyo"]
+    
+    fetch_weather(target_cities, api_key)
