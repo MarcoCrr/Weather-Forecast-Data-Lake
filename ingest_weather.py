@@ -16,15 +16,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-DATA_DIR = os.path.join("data", "raw")
+# Resolves the directory relative to this script's location to keep all data inside the project folder
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DATA_DIR = os.path.join(SCRIPT_DIR, "data")
+DATA_DIR = os.path.join(PARENT_DATA_DIR, "bronze")
 
 def save_raw_data(city, data):
     """
-    Saves the raw JSON data to the local filesystem under data/raw/
+    Saves the raw JSON data to the local filesystem under the project folder
     with a timestamped filename.
     """
     try:
-        # Ensure the output directory exists
+        # Ensure the output directory exists (this will also create PARENT_DATA_DIR if not present)
         os.makedirs(DATA_DIR, exist_ok=True)
         
         # Generate a safe filename with timestamp
