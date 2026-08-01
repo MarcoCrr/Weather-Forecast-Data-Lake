@@ -21,10 +21,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 DATA_DIR = os.path.join(PARENT_DATA_DIR, "bronze")
 
-def save_raw_data(city, data):
+def save_raw_data(combined_data):
     """
-    Saves the raw JSON data to the local filesystem under the project folder
-    with a timestamped filename.
+    Saves the aggregated JSON data for all cities to the local filesystem
+    under the project folder with a single timestamped filename.
     """
     try:
         # Ensure the output directory exists (this will also create PARENT_DATA_DIR if not present)
@@ -32,24 +32,24 @@ def save_raw_data(city, data):
         
         # Generate a safe filename with timestamp
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_city_name = city.lower().replace(" ", "_")
-        filename = f"{safe_city_name}_{timestamp}.json"
+        filename = f"weather_data_{timestamp}.json"
         filepath = os.path.join(DATA_DIR, filename)
         
-        # Write JSON data to file
+        # Write combined JSON data to file
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+            json.dump(combined_data, f, indent=4, ensure_ascii=False)
             
-        logger.info(f"Successfully saved raw data for {city} to {filepath}")
+        logger.info(f"Successfully saved raw data for all cities to {filepath}")
     except IOError as e:
-        logger.error(f"Failed to save data for {city} to disk: {e}")
+        logger.error(f"Failed to save combined data to disk: {e}")
 
 def fetch_weather(cities, api_key):
     """
     Fetches current weather data for a list of cities using the OpenWeather API
-    and saves the raw JSON response locally.
+    and saves all city responses into a single raw JSON file locally.
     """
     base_url = "https://api.openweathermap.org/data/2.5/weather"
+    all_weather_data = {}
     
     for city in cities:
         logger.info(f"Fetching weather for {city}...")
@@ -64,8 +64,7 @@ def fetch_weather(cities, api_key):
             response.raise_for_status()
             data = response.json()
             
-            # Save the raw JSON data locally
-            save_raw_data(city, data)
+            all_weather_data[city] = data
             
         except requests.exceptions.HTTPError as http_err:
             logger.error(f"HTTP error occurred for {city}: {http_err}")
@@ -73,6 +72,11 @@ def fetch_weather(cities, api_key):
                 logger.error("Please check if your OPENWEATHER_API_KEY is valid.")
         except Exception as err:
             logger.error(f"An error occurred for {city}: {err}")
+
+    if all_weather_data:
+        save_raw_data(all_weather_data)
+    else:
+        logger.warning("No weather data was successfully fetched for any city.")
 
 if __name__ == "__main__":
     # Retrieve API key from environment variable
