@@ -37,92 +37,10 @@ def get_spark_session(app_name: str = "WeatherBronzeToSilver") -> SparkSession:
     )
 
 
-def get_openweather_schema() -> T.StructType:
-    """
-    Returns explicit schema definition for standard OpenWeather API responses.
-    Using explicit schemas improves performance by preventing schema inference passes.
-    """
-    coord_schema = T.StructType([
-        T.StructField("lon", T.DoubleType(), True),
-        T.StructField("lat", T.DoubleType(), True)
-    ])
-
-    weather_item_schema = T.StructType([
-        T.StructField("id", T.LongType(), True),
-        T.StructField("main", T.StringType(), True),
-        T.StructField("description", T.StringType(), True),
-        T.StructField("icon", T.StringType(), True)
-    ])
-
-    main_schema = T.StructType([
-        T.StructField("temp", T.DoubleType(), True),
-        T.StructField("feels_like", T.DoubleType(), True),
-        T.StructField("temp_min", T.DoubleType(), True),
-        T.StructField("temp_max", T.DoubleType(), True),
-        T.StructField("pressure", T.IntegerType(), True),
-        T.StructField("humidity", T.IntegerType(), True)
-    ])
-
-    wind_schema = T.StructType([
-        T.StructField("speed", T.DoubleType(), True),
-        T.StructField("deg", T.IntegerType(), True),
-        T.StructField("gust", T.DoubleType(), True)
-    ])
-
-    clouds_schema = T.StructType([
-        T.StructField("all", T.IntegerType(), True)
-    ])
-
-    sys_schema = T.StructType([
-        T.StructField("type", T.IntegerType(), True),
-        T.StructField("id", T.LongType(), True),
-        T.StructField("country", T.StringType(), True),
-        T.StructField("sunrise", T.LongType(), True),
-        T.StructField("sunset", T.LongType(), True)
-    ])
-
-    city_schema = T.StructType([
-        T.StructField("id", T.LongType(), True),
-        T.StructField("name", T.StringType(), True),
-        T.StructField("coord", coord_schema, True),
-        T.StructField("country", T.StringType(), True),
-        T.StructField("population", T.LongType(), True),
-        T.StructField("timezone", T.IntegerType(), True),
-        T.StructField("sunrise", T.LongType(), True),
-        T.StructField("sunset", T.LongType(), True)
-    ])
-
-    # Structure matching standard current weather or forecast-aggregated payload
-    payload_schema = T.StructType([
-        T.StructField("coord", coord_schema, True),
-        T.StructField("weather", T.ArrayType(weather_item_schema), True),
-        T.StructField("main", main_schema, True),
-        T.StructField("wind", wind_schema, True),
-        T.StructField("clouds", clouds_schema, True),
-        T.StructField("dt", T.LongType(), True),
-        T.StructField("sys", sys_schema, True),
-        T.StructField("timezone", T.IntegerType(), True),
-        T.StructField("id", T.LongType(), True),
-        T.StructField("name", T.StringType(), True),
-        T.StructField("cod", T.LongType(), True),
-        # Fields present in forecast hourly city payloads
-        T.StructField("city", city_schema, True),
-        T.StructField("weather_data", T.StructType([
-            T.StructField("main", main_schema, True),
-            T.StructField("weather", T.ArrayType(weather_item_schema), True),
-            T.StructField("clouds", clouds_schema, True),
-            T.StructField("wind", wind_schema, True),
-            T.StructField("dt", T.LongType(), True)
-        ]), True)
-    ])
-
-    return payload_schema
-
-
 def read_bronze_data(spark: SparkSession, bronze_dir: str):
     """
     Reads all raw JSON files under the Bronze directory recursively using Spark.
-    Filters to *.json files to ignore non-JSON files like .gitkeep.
+    Filters to *.json files to ignore non-JSON files.
     Enables multiLine parsing for pretty-printed JSON records.
     """
     logger.info(f"Reading bronze JSON data from path: {bronze_dir}")
@@ -142,124 +60,71 @@ def read_bronze_data(spark: SparkSession, bronze_dir: str):
 
 def transform_bronze_to_silver(df):
     """
-    Transforms raw JSON DataFrame into a cleaned, flattened, standardized Silver DataFrame.
+    Flattens Bronze records into the Silver analytical model.
+    One row = one city forecast.
     """
-    # Exclude internal corrupt record column if present
-    field_names = [col for col in df.columns if col != "_corrupt_record"]
-
-    if not field_names:
-        raise ValueError("No valid data columns found in Bronze JSON files. Ensure files contain valid JSON.")
 
     if df.rdd.isEmpty():
         logger.warning("Input DataFrame contains no records.")
         return df
-    
-    # Build dynamic expression to stack dynamic city columns into rows
-    stack_exprs = []
-    for col_name in field_names:
-        # Sanitize column name escaping for backticks
-        escaped_col = f"`{col_name}`"
-        stack_exprs.append(f"'{col_name}', {escaped_col}")
 
-    stack_str = f"stack({len(field_names)}, {', '.join(stack_exprs)}) as (raw_city_key, payload)"
-    
-    flattened_df = df.select(F.expr(stack_str)).filter(F.col("payload").isNotNull())
+    silver_df = df.select(
+        # Metadata
+        F.col("metadata.city_name").alias("city_name"),
+        F.col("metadata.source.provider").alias("provider"),
+        F.col("metadata.source.endpoint").alias("endpoint"),
+        F.to_timestamp("metadata.ingestion_timestamp").alias("ingestion_timestamp"),
+        F.to_timestamp("metadata.forecast_timestamp").alias("forecast_timestamp"),
 
-    # Extract nested payload metrics (handling both current weather and forecast payloads)
-    transformed = flattened_df.select(
-        F.col("raw_city_key").alias("city_key"),
-        F.coalesce(
-            F.col("payload.name"),
-            F.col("payload.city.name"),
-            F.col("raw_city_key")
-        ).alias("city_name"),
-        F.coalesce(
-            F.col("payload.id"),
-            F.col("payload.city.id")
-        ).alias("city_id"),
-        F.coalesce(
-            F.col("payload.sys.country"),
-            F.col("payload.city.country")
-        ).alias("country"),
-        F.coalesce(
-            F.col("payload.coord.lat"),
-            F.col("payload.city.coord.lat")
-        ).alias("latitude"),
-        F.coalesce(
-            F.col("payload.coord.lon"),
-            F.col("payload.city.coord.lon")
-        ).alias("longitude"),
-        F.coalesce(
-            F.col("payload.dt"),
-            F.col("payload.weather_data.dt")
-        ).alias("observation_timestamp_epoch"),
-        F.coalesce(
-            F.col("payload.main.temp"),
-            F.col("payload.weather_data.main.temp")
-        ).alias("temp_celsius"),
-        F.coalesce(
-            F.col("payload.main.feels_like"),
-            F.col("payload.weather_data.main.feels_like")
-        ).alias("feels_like_celsius"),
-        F.coalesce(
-            F.col("payload.main.temp_min"),
-            F.col("payload.weather_data.main.temp_min")
-        ).alias("temp_min_celsius"),
-        F.coalesce(
-            F.col("payload.main.temp_max"),
-            F.col("payload.weather_data.main.temp_max")
-        ).alias("temp_max_celsius"),
-        F.coalesce(
-            F.col("payload.main.pressure"),
-            F.col("payload.weather_data.main.pressure")
-        ).alias("pressure_hpa"),
-        F.coalesce(
-            F.col("payload.main.humidity"),
-            F.col("payload.weather_data.main.humidity")
-        ).alias("humidity_percent"),
-        F.coalesce(
-            F.col("payload.wind.speed"),
-            F.col("payload.weather_data.wind.speed")
-        ).alias("wind_speed_m_s"),
-        F.coalesce(
-            F.col("payload.wind.deg"),
-            F.col("payload.weather_data.wind.deg")
-        ).alias("wind_deg"),
-        F.coalesce(
-            F.col("payload.clouds.all"),
-            F.col("payload.weather_data.clouds.all")
-        ).alias("cloudiness_percent"),
-        F.element_at(
-            F.coalesce(
-                F.col("payload.weather.main"),
-                F.col("payload.weather_data.weather.main")
-            ), 1
-        ).alias("weather_condition"),
-        F.element_at(
-            F.coalesce(
-                F.col("payload.weather.description"),
-                F.col("payload.weather_data.weather.description")
-            ), 1
-        ).alias("weather_description")
+        # City
+        F.col("city.id").alias("city_id"),
+        F.col("city.country").alias("country"),
+        F.col("city.coord.lat").alias("latitude"),
+        F.col("city.coord.lon").alias("longitude"),
+        F.col("city.population").alias("population"),
+        F.col("city.timezone").alias("timezone_offset_seconds"),
+
+        # Weather metrics
+        F.col("payload.main.temp").alias("temp_celsius"),
+        F.col("payload.main.feels_like").alias("feels_like_celsius"),
+        F.col("payload.main.temp_min").alias("temp_min_celsius"),
+        F.col("payload.main.temp_max").alias("temp_max_celsius"),
+        F.col("payload.main.pressure").alias("pressure_hpa"),
+        F.col("payload.main.humidity").alias("humidity_percent"),
+        F.col("payload.main.sea_level").alias("sea_level_hpa"),
+        F.col("payload.main.grnd_level").alias("ground_level_hpa"),
+        F.col("payload.main.dew_point").alias("dew_point_celsius"),
+
+        # Wind
+        F.col("payload.wind.speed").alias("wind_speed_m_s"),
+        F.col("payload.wind.deg").alias("wind_direction_deg"),
+        F.col("payload.wind.gust").alias("wind_gust_m_s"),
+
+        # Clouds & visibility
+        F.col("payload.clouds.all").alias("cloud_cover_percent"),
+        F.col("payload.visibility").alias("visibility_m"),
+
+        # Rain probability
+        F.col("payload.pop").alias("precipitation_probability"),
+
+        # Weather description
+        F.element_at("payload.weather.main", 1).alias("weather_main"),
+        F.element_at("payload.weather.description", 1).alias("weather_description"),
+
+        # Original epoch
+        F.col("payload.dt").alias("forecast_epoch")
     )
 
-    # Convert timestamp epoch to explicit UTC Timestamp
-    transformed = transformed.withColumn(
-        "observation_timestamp",
-        F.to_timestamp(F.from_unixtime(F.col("observation_timestamp_epoch")))
+    # Partition columns
+    silver_df = (
+        silver_df
+        .withColumn("year", F.date_format("forecast_timestamp", "yyyy"))
+        .withColumn("month", F.date_format("forecast_timestamp", "MM"))
+        .withColumn("day", F.date_format("forecast_timestamp", "dd"))
+        .withColumn("hour", F.date_format("forecast_timestamp", "HH"))
     )
 
-    # Add partition metadata columns derived from observation time
-    transformed = (
-        transformed
-        .withColumn("year", F.date_format("observation_timestamp", "yyyy"))
-        .withColumn("month", F.date_format("observation_timestamp", "MM"))
-        .withColumn("day", F.date_format("observation_timestamp", "dd"))
-        .withColumn("hour", F.date_format("observation_timestamp", "HH"))
-        .withColumn("ingestion_timestamp", F.current_timestamp())
-    )
-
-    return transformed
+    return silver_df
 
 
 def validate_and_clean_data(df):
@@ -271,13 +136,13 @@ def validate_and_clean_data(df):
     # Filter invalid records (null timestamp, missing city, or unphysical temperature values)
     cleaned_df = df.filter(
         F.col("city_name").isNotNull() &
-        F.col("observation_timestamp").isNotNull() &
+        F.col("forecast_timestamp").isNotNull() &
         F.col("temp_celsius").between(-100.0, 70.0) &
         F.col("humidity_percent").between(0, 100)
     )
 
-    # Deduplicate entries by city name and exact observation timestamp
-    deduped_df = cleaned_df.dropDuplicates(["city_name", "observation_timestamp"])
+    # Deduplicate entries by city name and exact forecast timestamp
+    deduped_df = cleaned_df.dropDuplicates(["city_name", "forecast_timestamp"])
 
     return deduped_df
 
