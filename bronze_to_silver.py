@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Script path constants
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TMP_DIR = os.path.join(SCRIPT_DIR, "tmp")
+os.makedirs(TMP_DIR, exist_ok=True)
 DEFAULT_BRONZE_DIR = os.path.join(SCRIPT_DIR, "data", "bronze")
 
 
@@ -32,6 +34,8 @@ def get_spark_session(app_name: str = "WeatherBronzeToSilver") -> SparkSession:
         .config("spark.hadoop.hadoop.security.authentication", "simple")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+        .config("spark.driver.extraJavaOptions", f"-Djava.io.tmpdir={TMP_DIR}")
+        .config("spark.local.dir", TMP_DIR)
         .config("spark.sql.parquet.compression.codec", "snappy")
         .getOrCreate()
     )
