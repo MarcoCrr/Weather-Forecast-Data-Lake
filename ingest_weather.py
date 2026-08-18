@@ -87,10 +87,14 @@ def get_partitioned_dir(target_dt):
     return os.path.join(DATA_DIR, year, month, day, hour)
 
 
-def save_raw_data(combined_data, target_dt=None):
+def save_raw_data(records, target_dt=None):
     """
-    Saves the aggregated JSON data for all cities to the local filesystem
-    organized by year/month/day/hour structure.
+    Saves a list of Bronze records as a JSON array.
+
+    Each element represents one city forecast and contains:
+    - metadata
+    - city information
+    - raw OpenWeather payload
     """
     if target_dt is None:
         target_dt = datetime.now(timezone.utc)
@@ -104,11 +108,12 @@ def save_raw_data(combined_data, target_dt=None):
         filepath = os.path.join(partition_dir, filename)
 
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(combined_data, f, indent=4, ensure_ascii=False)
+            json.dump(records, f, indent=4, ensure_ascii=False)
 
-        logger.info(f"Successfully saved raw data for all cities to {filepath}")
+        logger.info(f"Successfully saved {len(records)} Bronze records to {filepath}")
+
     except IOError as e:
-        logger.error(f"Failed to save combined data to disk: {e}")
+        logger.error(f"Failed to save Bronze data: {e}")
 
 
 def fetch_weather(cities, api_key):
@@ -118,6 +123,7 @@ def fetch_weather(cities, api_key):
     """
     base_url = "https://api.openweathermap.org/data/2.5/weather"
     all_weather_data = {}
+    session = requests.Session()
 
     for city in cities:
         logger.info(f"Fetching weather for {city}...")
@@ -128,7 +134,11 @@ def fetch_weather(cities, api_key):
         }
 
         try:
-            response = requests.get(base_url, params=params)
+            response = session.get(
+                            base_url,
+                            params=params,
+                            timeout=10
+                        )
             response.raise_for_status()
             data = response.json()
 
@@ -154,6 +164,7 @@ def fetch_forecast_weather(cities, api_key, start_dt, end_dt):
     """
     base_url = "https://api.openweathermap.org/data/2.5/forecast"
     city_forecasts = {}
+    session = requests.Session()
 
     for city in cities:
         logger.info(f"Fetching forecast weather for {city}...")
@@ -164,7 +175,11 @@ def fetch_forecast_weather(cities, api_key, start_dt, end_dt):
         }
 
         try:
-            response = requests.get(base_url, params=params)
+            response = session.get(
+                base_url,
+                params=params,
+                timeout=10
+            )
             response.raise_for_status()
             forecast_json = response.json()
 
@@ -195,20 +210,36 @@ def fetch_forecast_weather(cities, api_key, start_dt, end_dt):
 
     hourly_timestamps = generate_1hour_timestamps(start_dt, end_dt)
     for target_dt in hourly_timestamps:
-        hourly_city_data = {}
+
+        bronze_records = []
+
         for city, data in city_forecasts.items():
+
             items = data["items"]
-            # Find the closest forecast entry for this hourly timestamp
+
             closest_item_dt, closest_item = min(
                 items,
                 key=lambda x: abs((x[0] - target_dt).total_seconds())
             )
-            hourly_city_data[city] = {
-                "city": data["city"],
-                "weather": closest_item
-            }
 
-        save_raw_data(hourly_city_data, target_dt)
+            bronze_records.append(
+                {
+                    "metadata": {
+                        "schema_version": "1.0",
+                        "city_name": city,
+                        "source": {
+                            "provider": "OpenWeather",
+                            "endpoint": "forecast"
+                        },
+                        "ingestion_timestamp": target_dt.isoformat(),
+                        "forecast_timestamp": closest_item_dt.isoformat()
+                    },
+                    "city": data["city"],
+                    "payload": closest_item
+                }
+            )
+
+        save_raw_data(bronze_records, target_dt)
 
 
 def main():
