@@ -122,10 +122,10 @@ def transform_bronze_to_silver(df):
     # Partition columns
     silver_df = (
         silver_df
-        .withColumn("year", F.date_format("forecast_timestamp", "yyyy"))
-        .withColumn("month", F.date_format("forecast_timestamp", "MM"))
-        .withColumn("day", F.date_format("forecast_timestamp", "dd"))
-        .withColumn("hour", F.date_format("forecast_timestamp", "HH"))
+        .withColumn("year", F.date_format("ingestion_timestamp", "yyyy"))
+        .withColumn("month", F.date_format("ingestion_timestamp", "MM"))
+        .withColumn("day", F.date_format("ingestion_timestamp", "dd"))
+        .withColumn("hour", F.date_format("ingestion_timestamp", "HH"))
     )
 
     return silver_df
@@ -145,8 +145,8 @@ def validate_and_clean_data(df):
         F.col("humidity_percent").between(0, 100)
     )
 
-    # Deduplicate entries by city name and exact forecast timestamp
-    deduped_df = cleaned_df.dropDuplicates(["city_name", "forecast_timestamp"])
+    # Deduplicate entries by city name and exact ingestion timestamp
+    deduped_df = cleaned_df.dropDuplicates(["city_name", "ingestion_timestamp"])
 
     return deduped_df
 
@@ -159,7 +159,7 @@ def write_silver_data(df, silver_dir: str):
 
     (
         df.write
-        .mode("overwrite")
+        .mode("append")
         .partitionBy("year", "month", "day", "hour")
         .option("compression", "snappy")
         .parquet(silver_dir)
