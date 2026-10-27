@@ -1,0 +1,8 @@
+.aider*
+data/bronze/*
+data/silver/*
+data/gold/*
+Dockerfile
+instructions.txt
+os
+sys
