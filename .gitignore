@@ -6,3 +6,4 @@ Dockerfile
 instructions.txt
 os
 sys
+*/pycache__/*
