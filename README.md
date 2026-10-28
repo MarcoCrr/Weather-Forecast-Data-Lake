@@ -1,57 +1,67 @@
-# Weather Forecast Data Lake
+# European Weather Data Engineering Pipeline
 
-A modern Data Engineering project that builds a Bronze–Silver data lake from hourly weather forecast data using Python, PySpark, and Docker.
+A containerized data engineering project that collects weather forecasts for 31 European cities and transforms them into structured datasets for analytical queries and visualization. The project combines Python, PySpark, DuckDB SQL, Docker, and Seaborn in a layered data pipeline.
 
-**Status:** Work in Progress: the Bronze and Silver layers are implemented; the Gold analytical layer and orchestration are planned.
+**Status:** Work in Progress: tests are missing, more visualizations and gold datasets are planned.
 
 ---
 
 ## Overview
 
-This project implements an end-to-end weather data pipeline inspired by modern data lake architectures.
+The pipeline retrieves forecast data from the OpenWeather API, stores raw JSON files, processes them into validated Parquet datasets, and generates analytical outputs using SQL. Python visualization scripts then use the gold layer data to explore temperature patterns across cities and forecast dates.
 
-Every hour, weather forecasts for 31 European cities are collected from the **OpenWeather Forecast API**, stored as raw Bronze data, and transformed into a clean, analytical Silver layer using PySpark.
+The project follows a **Bronze–Silver–Gold architecture** inspired by the medallion data lake pattern.
 
-### Current architecture
-
-```text
-OpenWeather API
-        │
-        ▼
- Bronze Layer (JSON)
-        │
-        ▼
- Silver Layer (Parquet)
-        │
-        ▼
- Gold Layer (*planned*)
-```
-
----
 
 ## Features
 
-- Hourly ingestion of weather forecasts for 31 European cities
-- Bronze data lake with partitioned raw JSON storage
-- Silver layer built with PySpark
-- Flattening of nested OpenWeather payloads into analytical tables
-- Data validation and quality checks
-- Hive-style partitioned Parquet datasets
-- Fully containerized development environment using Docker
-- Configurable command-line ETL scripts
+### Bronze Layer
+- Retrieves weather forecast data for 31 European cities using the OpenWeather API.
+- Stores raw API responses as JSON files organized by date and time.
+- Preserves raw data for subsequent processing.
+
+### Silver Layer
+- Uses PySpark to transform raw JSON data into structured datasets.
+- Normalizes timestamps and weather-related fields.
+- Applies data validation and deduplication.
+- Stores cleaned data in partitioned Parquet files.
+
+### Gold Layer
+
+- Uses DuckDB SQL to query Silver-layer Parquet datasets directly.
+- Produces analytical datasets, including daily average temperature rankings by city.
+- Stores query results as Parquet files for efficient downstream analysis.
+
+
+### Visualization
+
+- Uses Pandas to load Gold-layer Parquet datasets.
+- Uses Seaborn and Matplotlib to generate:
+   - Temperature heatmap: Explore temperature differences across cities and forecast dates.
+   - Temperature rankings: Compare average forecast temperatures across cities for a selected date.
+   - Temperature trends: Compare forecast temperature patterns across cities and dates.
+- Saves generated charts as PNG images for further analysis and reporting.
+
+![Heatmap](visualizations/output/temperature_heatmap.png)
+
+![Rankings](visualizations/output/temperature_rankings.png)
+
+![Trends](visualizations/output/temperature_trends.png)
 
 ---
 
-## Technologies
+### Technologies
 
-| Category | Stack |
-|----------|------|
-| Language | Python 3.12 |
-| Data Processing | PySpark |
-| Storage | JSON, Parquet |
-| API | OpenWeather Forecast API |
-| Containerization | Docker |
-| Logging | Python `logging` |
+**Python** — ingestion, orchestration, data loading, and visualization <br>
+**OpenWeather API** — weather forecast data source <br>
+**PySpark** — ETL and data transformation <br>
+**DuckDB SQL** — analytical queries and Gold-layer generation <br>
+**Parquet** — columnar storage for structured datasets <br>
+**Pandas** — tabular data manipulation <br>
+**Seaborn & Matplotlib** — data visualization <br>
+**Docker** — reproducible execution environment <br>
+**pytest** — planned testing for visualization components <br>
+
 
 ---
 
@@ -59,15 +69,20 @@ OpenWeather API
 
 ```text
 .
-├── data
-│   ├── bronze
-│   │   └── YYYY/MM/DD/HH/
-│   └── silver
-│       └── year=YYYY/month=MM/day=DD/hour=HH/
-├── cities_files
-│   └── cities.txt
+├── data/
+│   ├── bronze/
+│   ├── silver/
+│   └── gold/
+├── sql/
+├── visualizations/
+│   ├── __init__.py
+│   ├── data_loader.py
+│   ├── plots.py
+│   ├── main.py
+│   └── output/
 ├── ingest_weather.py
 ├── bronze_to_silver.py
+├── make_gold_sql.py
 ├── Dockerfile
 └── README.md
 ```
@@ -127,6 +142,8 @@ The Silver dataset is stored as **partitioned Parquet** for efficient analytical
 
 ## Running the project
 
+**Note**: The structure may evolve as additional features are introduced. This itself section needs some improvements, which are planned.
+
 ### Option 1 (recommended): Docker
 
 Build the container:
@@ -135,7 +152,7 @@ Build the container:
 docker build -t weather-data-lake .
 ```
 
-Run it:
+1. **Run it:**
 
 ```bash
 docker run -it \
@@ -143,13 +160,35 @@ docker run -it \
   weather-data-lake
 ```
 
-Inside the container:
+2. **Inside the container:**
 
 ```bash
 python ingest_weather.py --start-date DD-MM-YYYY --end-date DD-MM-YYYY
 
 python bronze_to_silver.py
 ```
+
+3. **Generate Gold datasets**
+
+Run the SQL execution script from the project root:
+```bash
+python make_gold_sql.py
+```
+This executes the DuckDB SQL query and generates analytical Parquet datasets in the Gold layer.
+
+
+5. **Generate visualizations**
+
+This step needs additional dependencies, which one can install (inside or outside the Docker container) with:
+```bash
+python -m pip install pandas pyarrow seaborn matplotlib
+```
+From the project root, run:
+```bash
+python -m visualizations.main
+```
+The resulting charts are saved to visualizations/output/.
+
 
 ---
 
@@ -161,6 +200,7 @@ Requirements:
 - Java (JDK 17 or compatible)
 - PySpark
 - Requests
+- ...(work in progress)
 
 Install dependencies:
 
@@ -192,16 +232,3 @@ export OPENWEATHER_API_KEY="your_api_key"
 - Validates numerical ranges
 - Removes duplicate ingestion records
 - Writes Hive-partitioned Parquet
-
----
-
-## Example analytical use cases (planned Gold layer)
-
-- Daily minimum, maximum, and average temperatures
-- Warmest and coldest European cities ranking
-- Wind speed and cloud cover comparisons
-- Precipitation probability summaries
-- Regional climate analysis
-- Interactive geographic weather dashboards
-
----
